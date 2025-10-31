@@ -2,16 +2,11 @@
 # pylint: disable=all
 # ruff: noqa
 
-CAMERA_CONFIG = {
-    "index": 0,
-    "width": 640,
-    "height": 480,
-    "fps": 30,
-}
+CAMERA_CONFIG = {"index": 0, "width": 640, "height": 480, "fps": 30}
 
 
 ESP32_CONFIG = {
-    "port": "/dev/ttyUSB0",
+    "port": "COM3",
     "baudrate": 115200,
     "timeout": 1,
 }
@@ -23,6 +18,13 @@ SERVO_CONFIG = {
     "pan_range": (0, 180),
     "tilt_range": (30, 150),
     "max_speed": 5,
+}
+
+
+ROBOFLOW_CONFIG = {
+    "model_id": "ia-ummrp/proyectoia-x1a1m-instant-3",
+    "api_key": "JXY5fkF8ztca20KkTmKX",
+    "confidence": 0.5,
 }
 
 

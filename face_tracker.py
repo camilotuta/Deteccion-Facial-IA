@@ -2,18 +2,28 @@
 # pylint: disable=all
 # ruff: noqa
 
+
 import cv2
 import numpy as np
+from inference import get_model
+import supervision as sv
 from pid_controller import PIDController
-from config import CAMERA_CONFIG, TRACKING_CONFIG, PID_CONFIG, DEADZONE, SERVO_CONFIG
+from config import (
+    CAMERA_CONFIG,
+    TRACKING_CONFIG,
+    PID_CONFIG,
+    DEADZONE,
+    SERVO_CONFIG,
+    ROBOFLOW_CONFIG,
+)
 
 
 class FaceTracker:
     def __init__(self):
 
-        self.face_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        )
+        print("🔄 Cargando modelo de detección facial...")
+        self.model = get_model(model_id=ROBOFLOW_CONFIG["model_id"])
+        print("✅ Modelo cargado")
 
         self.frame_center = (CAMERA_CONFIG["width"] // 2, CAMERA_CONFIG["height"] // 2)
 
@@ -27,24 +37,45 @@ class FaceTracker:
 
         self.smoothing_factor = TRACKING_CONFIG["smoothing_factor"]
 
+        self.box_annotator = sv.BoxAnnotator()
+        self.label_annotator = sv.LabelAnnotator()
+
     def detect_face(self, frame):
-        """Detectar rostro en el frame"""
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        """Detectar rostro usando el modelo de Roboflow"""
+        try:
 
-        faces = self.face_cascade.detectMultiScale(
-            gray, scaleFactor=1.1, minNeighbors=5, minSize=(80, 80)
-        )
+            results = self.model.infer(frame)[0]
 
-        if len(faces) == 0:
-            return None
+            detections = sv.Detections.from_inference(results)
 
-        largest_face = max(faces, key=lambda f: f[2] * f[3])
-        x, y, w, h = largest_face
+            mask = detections.confidence >= ROBOFLOW_CONFIG["confidence"]
+            detections = detections[mask]
 
-        center_x = x + w // 2
-        center_y = y + h // 2
+            if len(detections) == 0:
+                return None, None
 
-        return {"bbox": (x, y, w, h), "center": (center_x, center_y), "area": w * h}
+            areas = (detections.xyxy[:, 2] - detections.xyxy[:, 0]) * (
+                detections.xyxy[:, 3] - detections.xyxy[:, 1]
+            )
+            largest_idx = np.argmax(areas)
+
+            x1, y1, x2, y2 = detections.xyxy[largest_idx]
+
+            center_x = int((x1 + x2) / 2)
+            center_y = int((y1 + y2) / 2)
+
+            face_info = {
+                "bbox": (int(x1), int(y1), int(x2 - x1), int(y2 - y1)),
+                "center": (center_x, center_y),
+                "area": areas[largest_idx],
+                "confidence": detections.confidence[largest_idx],
+            }
+
+            return face_info, detections
+
+        except Exception as e:
+            print(f"Error en detección: {e}")
+            return None, None
 
     def calculate_servo_angles(self, face_center):
         """Calcular ángulos de servos basado en posición del rostro"""
@@ -86,19 +117,21 @@ class FaceTracker:
         result = {
             "face_detected": False,
             "face_info": None,
+            "detections": None,
             "pan_angle": self.current_pan,
             "tilt_angle": self.current_tilt,
             "error": (0, 0),
         }
 
         if frame_count % TRACKING_CONFIG["detection_interval"] == 0:
-            face_info = self.detect_face(frame)
+            face_info, detections = self.detect_face(frame)
 
             if face_info:
                 self.face_detected = True
                 self.last_face_center = face_info["center"]
                 result["face_detected"] = True
                 result["face_info"] = face_info
+                result["detections"] = detections
 
                 pan, tilt = self.calculate_servo_angles(face_info["center"])
 
@@ -120,6 +153,40 @@ class FaceTracker:
         """Dibujar anotaciones en el frame"""
         annotated = frame.copy()
 
+        if result["face_detected"] and result["detections"] is not None:
+
+            annotated = self.box_annotator.annotate(
+                scene=annotated, detections=result["detections"]
+            )
+
+            labels = [f"Face {conf:.2f}" for conf in result["detections"].confidence]
+            annotated = self.label_annotator.annotate(
+                scene=annotated, detections=result["detections"], labels=labels
+            )
+
+            if result["face_info"]:
+                cv2.circle(annotated, result["face_info"]["center"], 5, (0, 0, 255), -1)
+
+                cv2.line(
+                    annotated,
+                    self.frame_center,
+                    result["face_info"]["center"],
+                    (0, 255, 0),
+                    2,
+                )
+
+                error_x, error_y = result["error"]
+                confidence = result["face_info"]["confidence"]
+                cv2.putText(
+                    annotated,
+                    f"Error: X={error_x:.0f} Y={error_y:.0f} | Conf: {confidence:.2f}",
+                    (10, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (255, 255, 255),
+                    2,
+                )
+
         cv2.drawMarker(
             annotated, self.frame_center, (0, 255, 255), cv2.MARKER_CROSS, 20, 2
         )
@@ -137,27 +204,6 @@ class FaceTracker:
             (255, 255, 0),
             1,
         )
-
-        if result["face_detected"] and result["face_info"]:
-            face = result["face_info"]
-            x, y, w, h = face["bbox"]
-
-            cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-            cv2.circle(annotated, face["center"], 5, (0, 0, 255), -1)
-
-            cv2.line(annotated, self.frame_center, face["center"], (0, 255, 0), 2)
-
-            error_x, error_y = result["error"]
-            cv2.putText(
-                annotated,
-                f"Error: X={error_x:.0f} Y={error_y:.0f}",
-                (10, 60),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (255, 255, 255),
-                2,
-            )
 
         cv2.putText(
             annotated,
