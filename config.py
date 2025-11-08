@@ -4,40 +4,48 @@
 
 CAMERA_CONFIG = {"index": 0, "width": 640, "height": 480, "fps": 30}
 
-
 ESP32_CONFIG = {
-    "port": "COM3",
+    "port": "COM7",
     "baudrate": 115200,
     "timeout": 1,
 }
-
 
 SERVO_CONFIG = {
     "pan_center": 90,
     "tilt_center": 90,
     "pan_range": (0, 180),
     "tilt_range": (30, 150),
-    "max_speed": 5,
+    "max_speed": 8,  # Aumentado para movimiento más rápido
 }
-
 
 ROBOFLOW_CONFIG = {
-    "model_id": "ia-ummrp/proyectoia-x1a1m-instant-3",
-    "api_key": "JXY5fkF8ztca20KkTmKX",
-    "confidence": 0.5,
+    "model_id": "proyectoia-x1a1m/5",
+    "api_key": "G3DInDmk3SRmV3S74mMJ",
+    "confidence": 0.4,  # Reducido para mejor detección
+    "tracking_confidence": 0.85,  # Reducido de 0.90 a 0.85
 }
-
 
 TRACKING_CONFIG = {
-    "detection_interval": 1,
-    "smoothing_factor": 0.3,
+    "detection_interval": 1,  # Detectar en cada frame para mejor fluidez
+    "smoothing_factor": 0.5,  # Aumentado para movimiento más suave
+    "target_person": None,
+    "debug_mode": True,
+    "frame_skip": 1,  # Procesar cada frame (1 = sin saltos)
 }
-
 
 PID_CONFIG = {
-    "pan": {"kp": 0.15, "ki": 0.01, "kd": 0.08},
-    "tilt": {"kp": 0.15, "ki": 0.01, "kd": 0.08},
+    "pan": {"kp": 0.20, "ki": 0.015, "kd": 0.12},  # Aumentado para respuesta más rápida
+    "tilt": {"kp": 0.20, "ki": 0.015, "kd": 0.12},
 }
 
+DEADZONE = {"x": 15, "y": 15}  # Reducido para mejor centrado
 
-DEADZONE = {"x": 20, "y": 20}
+# Archivo JSON para compartir datos con ESP32
+SERVO_DATA_FILE = "servo_position.json"
+
+# Colores para cada persona (BGR)
+PERSON_COLORS = {
+    "tuta": (255, 0, 0),  # Azul
+    "laura": (0, 255, 0),  # Verde
+    "unknown": (128, 128, 128),  # Gris
+}
