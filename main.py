@@ -9,6 +9,7 @@ from face_tracker import FaceTracker
 from esp32_controller import ESP32Controller
 from servo_file_manager import ServoFileManager
 from detection_logger import DetectionLogger
+from mqtt_sender import MQTTSender
 
 
 def print_controls():
@@ -23,13 +24,11 @@ def print_controls():
     print("  l - Seguir a LAURA")
     print("  n - No seguir a nadie")
     print("  h - Mostrar esta ayuda")
-    print("  + - Aumentar velocidad")
-    print("  - - Disminuir velocidad")
     print("=" * 60 + "\n")
 
 
 def main():
-    print("🎯 Iniciando sistema de seguimiento facial optimizado...")
+    print("🎯 Iniciando sistema de seguimiento facial - TIEMPO REAL")
 
     # Inicializar componentes
     camera = CameraHandler()
@@ -37,26 +36,34 @@ def main():
     esp32 = ESP32Controller()
     file_manager = ServoFileManager()
     logger = DetectionLogger()
+    mqtt = MQTTSender()  # NUEVO - MQTT para tiempo real
 
     if not camera.start():
         print("❌ Error: No se pudo iniciar la cámara")
         return
 
+    # Conectar ESP32 (opcional)
     if not esp32.connect():
-        print("❌ Error: No se pudo conectar con ESP32")
-        print("💡 Continuando sin ESP32 (solo guardando en archivo)")
+        print("⚠️  ESP32 no conectado (usando solo MQTT)")
+
+    # Conectar MQTT (CRÍTICO para tiempo real)
+    if not mqtt.connect():
+        print("❌ Error: No se pudo conectar a MQTT")
+        print("💡 Verifica tu conexión a Internet")
+        return
 
     print("✅ Sistema iniciado correctamente")
     print(f"📄 Archivo de servos: {file_manager.filename}")
+    print("🌐 MQTT: ACTIVO (Tiempo Real)")
     print_controls()
 
     # Centrar servos
-    esp32.center_servos()
+    mqtt.send_position(90, 90, tracking=False)
+    if esp32.connected:
+        esp32.center_servos()
     time.sleep(0.5)
 
     frame_count = 0
-    fps_start_time = time.time()
-    fps = 0
     fps_samples = []
 
     try:
@@ -71,10 +78,23 @@ def main():
             # Procesar tracking
             result = tracker.process_frame(frame, frame_count)
 
-            # Actualizar archivo JSON
+            # MQTT - Enviar en TIEMPO REAL (sin delay)
+            if result["target_locked"]:
+                mqtt.send_position(
+                    result["pan_angle"],
+                    result["tilt_angle"],
+                    tracking=True,
+                    confidence=result["target_face"]["confidence"],
+                    target=tracker.target_person,
+                )
+            else:
+                # Enviar posición centrada cuando no hay target
+                mqtt.send_position(90, 90, tracking=False)
+
+            # Actualizar archivo JSON (backup)
             file_manager.update_from_tracking(result, tracker.target_person)
 
-            # Enviar a ESP32 si está conectado
+            # Enviar a ESP32 si está conectado (legacy)
             if result["target_locked"] and esp32.connected:
                 esp32.update_position(result["pan_angle"], result["tilt_angle"])
 
@@ -84,7 +104,7 @@ def main():
                     result["all_faces"], result["target_face"], tracker.target_person
                 )
 
-            # Calcular FPS mejorado
+            # Calcular FPS
             frame_count += 1
             fps_samples.append(1.0 / (time.time() - loop_start + 0.001))
             if len(fps_samples) > 30:
@@ -94,8 +114,20 @@ def main():
             # Dibujar anotaciones
             annotated_frame = tracker.draw_annotations(frame, result, fps)
 
+            # Agregar indicador MQTT
+            mqtt_status = "🌐 MQTT: ACTIVO" if mqtt.connected else "🌐 MQTT: INACTIVO"
+            cv2.putText(
+                annotated_frame,
+                mqtt_status,
+                (10, 210),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 255, 0) if mqtt.connected else (0, 0, 255),
+                2,
+            )
+
             # Mostrar
-            cv2.imshow("Face Tracking System - Optimized", annotated_frame)
+            cv2.imshow("Face Tracking System - TIEMPO REAL", annotated_frame)
 
             # Controles
             key = cv2.waitKey(1) & 0xFF
@@ -105,7 +137,9 @@ def main():
                 break
 
             elif key == ord("c"):
-                esp32.center_servos()
+                mqtt.send_position(90, 90, tracking=False)
+                if esp32.connected:
+                    esp32.center_servos()
                 tracker.reset()
                 file_manager.write_position(
                     {
@@ -137,6 +171,7 @@ def main():
             elif key == ord("n"):
                 tracker.set_target_person(None)
                 logger.log_target_change(None)
+                mqtt.send_position(90, 90, tracking=False)
                 print("⏸️ Sin objetivo")
 
             elif key == ord("h"):
@@ -144,7 +179,9 @@ def main():
 
             # Mostrar stats cada 100 frames
             if frame_count % 100 == 0:
-                print(f"\n📊 FPS: {fps:.1f} | Frames: {frame_count}")
+                print(
+                    f"\n📊 FPS: {fps:.1f} | Frames: {frame_count} | MQTT: {mqtt.message_count} msgs"
+                )
                 if result["target_locked"]:
                     print(
                         f"🎯 Tracking: {tracker.target_person.upper()} "
@@ -158,8 +195,11 @@ def main():
     finally:
         print("🛑 Cerrando sistema...")
         camera.stop()
-        esp32.center_servos()
-        esp32.close()
+        mqtt.send_position(90, 90, tracking=False)  # Centrar antes de cerrar
+        mqtt.close()
+        if esp32.connected:
+            esp32.center_servos()
+            esp32.close()
         cv2.destroyAllWindows()
         print("✅ Sistema cerrado correctamente")
 
