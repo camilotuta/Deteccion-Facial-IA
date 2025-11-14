@@ -59,7 +59,7 @@ class MQTTSender:
             print("MQTT desconectado inesperadamente")
 
     def send_position(self, pan, tilt, tracking=False, confidence=0.0, target=None):
-        """Enviar posición de servos por MQTT"""
+        """Enviar posición de servos por MQTT (legacy)"""
         if not self.connected:
             return False
 
@@ -78,6 +78,47 @@ class MQTTSender:
 
         except Exception as e:
             print(f"Error enviando MQTT: {e}")
+            return False
+
+    def send_servo_command(
+        self,
+        pan_direction,
+        tilt,
+        duration=0.0,
+        update_tilt=True,
+        tracking=False,
+        confidence=0.0,
+        target=None,
+    ):
+        """Enviar comando de servos con sistema de pulsos (nuevo)"""
+        if not self.connected:
+            return False
+
+        try:
+            payload = {
+                "pan_direction": str(pan_direction),
+                "tilt": round(float(tilt), 2),
+                "duration": round(float(duration), 2),
+                "update_tilt": bool(update_tilt),
+                "tracking": bool(tracking),
+                "confidence": round(float(confidence), 4),
+                "target": str(target) if target else None,
+            }
+
+            self.client.publish(self.topic, json.dumps(payload))
+            self.message_count += 1
+
+            # Debug cada 50 mensajes
+            if self.message_count % 50 == 0:
+                print(
+                    f"📡 MQTT #{self.message_count}: {pan_direction} | Tilt={tilt:.1f}° | Conf={confidence*100:.1f}%"
+                )
+
+            return True
+
+        except Exception as e:
+            print(f"Error enviando MQTT: {e}")
+            return False
             return False
 
     def close(self):

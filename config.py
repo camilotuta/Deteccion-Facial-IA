@@ -19,7 +19,7 @@ SERVO_CONFIG = {
 }
 
 ROBOFLOW_CONFIG = {
-    "model_id": "proyectoia-x1a1m/5",
+    "model_id": "proyectoia-x1a1m/6",
     "api_key": "G3DInDmk3SRmV3S74mMJ",
     "confidence": 0.4,  # Reducido para mejor detección
     "tracking_confidence": 0.85,  # Reducido de 0.90 a 0.85

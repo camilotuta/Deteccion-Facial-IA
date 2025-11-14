@@ -38,7 +38,7 @@ class FaceTracker:
 
         self.smoothing_factor = TRACKING_CONFIG["smoothing_factor"]
         self.target_person = TRACKING_CONFIG["target_person"]
-        self.tracking_confidence_threshold = ROBOFLOW_CONFIG["tracking_confidence"]
+        self.tracking_confidence_threshold = 0.50  # Mínimo 50% de confianza
 
         self.box_annotator = sv.BoxAnnotator()
         self.label_annotator = sv.LabelAnnotator()
@@ -136,45 +136,48 @@ class FaceTracker:
         return matching_faces[0]
 
     def calculate_servo_angles(self, face_center):
-        """Calcular ángulos con mejor centrado"""
+        """Calcular dirección y ángulos - Sistema de pulsos"""
         error_x = face_center[0] - self.frame_center[0]
         error_y = face_center[1] - self.frame_center[1]
 
-        # Aplicar zona muerta más pequeña
-        if abs(error_x) < DEADZONE["x"]:
+        # Aplicar zona muerta más grande para movimiento suave
+        deadzone_x = 120  # Igual que simple_face_tracker
+        deadzone_y = 80
+
+        if abs(error_x) < deadzone_x:
             error_x = 0
-        if abs(error_y) < DEADZONE["y"]:
+        if abs(error_y) < deadzone_y:
             error_y = 0
 
-        # PID mejorado
-        pan_adjustment = self.pid_pan.update(error_x)
-        tilt_adjustment = self.pid_tilt.update(error_y)
+        # PAN: Determinar dirección (left/right/stop)
+        if error_x == 0:
+            pan_direction = "stop"
+        elif error_x < 0:
+            # Rostro a la izquierda -> seguir IZQUIERDA
+            pan_direction = "left"
+        else:
+            # Rostro a la derecha -> seguir DERECHA
+            pan_direction = "right"
 
-        # Limitar velocidad máxima
-        pan_adjustment = np.clip(
-            pan_adjustment, -SERVO_CONFIG["max_speed"], SERVO_CONFIG["max_speed"]
-        )
-        tilt_adjustment = np.clip(
-            tilt_adjustment, -SERVO_CONFIG["max_speed"], SERVO_CONFIG["max_speed"]
-        )
+        # TILT: Calcular ángulo con suavizado
+        tilt_step = 0.25  # Paso pequeño
+        if error_y == 0:
+            tilt_adjustment = 0.0
+        elif error_y < 0:
+            # Rostro arriba: subir cámara (menor ángulo)
+            tilt_adjustment = -tilt_step
+        else:
+            # Rostro abajo: bajar cámara (mayor ángulo)
+            tilt_adjustment = tilt_step
 
-        # Calcular nuevos ángulos
-        new_pan = self.current_pan - pan_adjustment
+        # Actualizar tilt con suavizado
         new_tilt = self.current_tilt + tilt_adjustment
+        new_tilt = self.current_tilt + (new_tilt - self.current_tilt) * 0.3
 
-        # Limitar rangos
-        new_pan = np.clip(new_pan, *SERVO_CONFIG["pan_range"])
-        new_tilt = np.clip(new_tilt, *SERVO_CONFIG["tilt_range"])
+        # Limitar rangos del tilt
+        new_tilt = np.clip(new_tilt, 60, 160)  # Rango del servo 180
 
-        # Suavizado mejorado
-        new_pan = (
-            self.current_pan + (new_pan - self.current_pan) * self.smoothing_factor
-        )
-        new_tilt = (
-            self.current_tilt + (new_tilt - self.current_tilt) * self.smoothing_factor
-        )
-
-        return new_pan, new_tilt
+        return pan_direction, new_tilt
 
     def process_frame(self, frame, frame_count):
         """Procesar frame optimizado"""
@@ -183,7 +186,7 @@ class FaceTracker:
             "target_face": None,
             "all_faces": [],
             "detections": None,
-            "pan_angle": self.current_pan,
+            "pan_direction": "stop",
             "tilt_angle": self.current_tilt,
             "error": (0, 0),
             "distance_to_center": 0,
@@ -213,13 +216,14 @@ class FaceTracker:
                     result["distance_to_center"] = distance
                     result["error"] = (error_x, error_y)
 
-                    # Calcular ángulos
-                    pan, tilt = self.calculate_servo_angles(target_face["center"])
+                    # Calcular dirección y ángulos (sistema de pulsos)
+                    pan_direction, tilt = self.calculate_servo_angles(
+                        target_face["center"]
+                    )
 
-                    self.current_pan = pan
+                    result["pan_direction"] = pan_direction
                     self.current_tilt = tilt
 
-                    result["pan_angle"] = pan
                     result["tilt_angle"] = tilt
 
                 else:
@@ -357,7 +361,7 @@ class FaceTracker:
 
         cv2.putText(
             annotated,
-            f"Pan: {result['pan_angle']:.1f}° Tilt: {result['tilt_angle']:.1f}°",
+            f"Pan: {result['pan_direction']} Tilt: {result['tilt_angle']:.1f}°",
             (10, 90),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,

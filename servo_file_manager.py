@@ -52,7 +52,8 @@ class ServoFileManager:
     def update_from_tracking(self, result, target_person=None):
         """Actualizar archivo desde resultado de tracking"""
         data = {
-            "pan": float(result["pan_angle"]),
+            "pan_direction": result.get("pan_direction", "stop"),
+            "pan": 90,  # Legacy, no se usa más con sistema de pulsos
             "tilt": float(result["tilt_angle"]),
             "tracking": result["target_locked"],
             "target": target_person,

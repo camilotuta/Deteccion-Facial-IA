@@ -78,18 +78,42 @@ def main():
             # Procesar tracking
             result = tracker.process_frame(frame, frame_count)
 
-            # MQTT - Enviar en TIEMPO REAL (sin delay)
+            # MQTT - Enviar en TIEMPO REAL con sistema de pulsos
             if result["target_locked"]:
-                mqtt.send_position(
-                    result["pan_angle"],
-                    result["tilt_angle"],
+                # Sistema de pulsos: enviar pan_direction y tilt_angle
+                pan_dir = result["pan_direction"]
+                tilt_angle = result["tilt_angle"]
+
+                # Determinar duración según dirección
+                if pan_dir == "left":
+                    duration = 0.15
+                elif pan_dir == "right":
+                    duration = 0.08
+                else:
+                    duration = 0.0
+
+                # update_tilt: True solo cuando pan está detenido
+                update_tilt = pan_dir == "stop"
+
+                # Enviar comando MQTT con formato correcto
+                mqtt.send_servo_command(
+                    pan_direction=pan_dir,
+                    tilt=tilt_angle,
+                    duration=duration,
+                    update_tilt=update_tilt,
                     tracking=True,
                     confidence=result["target_face"]["confidence"],
                     target=tracker.target_person,
                 )
             else:
-                # Enviar posición centrada cuando no hay target
-                mqtt.send_position(90, 90, tracking=False)
+                # Sin target: detener pan y mantener tilt
+                mqtt.send_servo_command(
+                    pan_direction="stop",
+                    tilt=tracker.current_tilt,
+                    duration=0.0,
+                    update_tilt=False,
+                    tracking=False,
+                )
 
             # Actualizar archivo JSON (backup)
             file_manager.update_from_tracking(result, tracker.target_person)
@@ -137,14 +161,21 @@ def main():
                 break
 
             elif key == ord("c"):
-                mqtt.send_position(90, 90, tracking=False)
+                mqtt.send_servo_command(
+                    pan_direction="stop",
+                    tilt=130,
+                    duration=0.0,
+                    update_tilt=True,
+                    tracking=False,
+                )
                 if esp32.connected:
                     esp32.center_servos()
                 tracker.reset()
+                tracker.current_tilt = 130
                 file_manager.write_position(
                     {
                         "pan": 90,
-                        "tilt": 90,
+                        "tilt": 130,
                         "tracking": False,
                         "target": None,
                         "error": {"x": 0, "y": 0},
@@ -171,7 +202,13 @@ def main():
             elif key == ord("n"):
                 tracker.set_target_person(None)
                 logger.log_target_change(None)
-                mqtt.send_position(90, 90, tracking=False)
+                mqtt.send_servo_command(
+                    pan_direction="stop",
+                    tilt=tracker.current_tilt,
+                    duration=0.0,
+                    update_tilt=False,
+                    tracking=False,
+                )
                 print("⏸️ Sin objetivo")
 
             elif key == ord("h"):
@@ -195,7 +232,13 @@ def main():
     finally:
         print("🛑 Cerrando sistema...")
         camera.stop()
-        mqtt.send_position(90, 90, tracking=False)  # Centrar antes de cerrar
+        mqtt.send_servo_command(
+            pan_direction="stop",
+            tilt=130,
+            duration=0.0,
+            update_tilt=True,
+            tracking=False,
+        )
         mqtt.close()
         if esp32.connected:
             esp32.center_servos()

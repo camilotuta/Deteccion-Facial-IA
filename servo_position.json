@@ -1,13 +1,14 @@
 {
-  "pan": 73.5177559970792,
-  "tilt": 150.0,
-  "tracking": true,
-  "target": "tuta",
+  "pan_direction": "stop",
+  "pan": 90,
+  "tilt": 160.0,
+  "tracking": false,
+  "target": "laura",
   "error": {
-    "x": -18,
-    "y": 27
+    "x": 0,
+    "y": 0
   },
-  "distance": 32.449961479175904,
-  "confidence": 0.9494105577468872,
-  "timestamp": "2025-11-08T18:24:39.601101"
+  "distance": 0.0,
+  "confidence": 0,
+  "timestamp": "2025-11-14T14:24:14.713700"
 }
